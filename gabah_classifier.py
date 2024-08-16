@@ -17,7 +17,7 @@ def load_models():
         'Decision Tree': joblib.load('saved_models/decision_tree.joblib'),
         'Gradient Boosting': joblib.load('saved_models/gradient_boosting.joblib'),
         'AdaBoost': joblib.load('saved_models/adaboost.joblib'),
-        'Extra Trees': joblib.load('saved_models/extra_trees.joblib'),
+        'Extra Trees (Recommendation)': joblib.load('saved_models/extra_trees.joblib'),
         'Gaussian Naive Bayes': joblib.load('saved_models/gaussian_naive_bayes.joblib'),
         'Logistic Regression': joblib.load('saved_models/logistic_regression.joblib'),
         'Neural Network': joblib.load('saved_models/neural_network.joblib')
@@ -92,7 +92,7 @@ if uploaded_file is not None:
     model_name = st.selectbox(
         'Select the model for prediction',
         ('Random Forest', 'SVM', 'KNN', 'Decision Tree', 'Gradient Boosting', 
-         'AdaBoost', 'Extra Trees', 'Gaussian Naive Bayes', 'Logistic Regression', 
+         'AdaBoost', 'Extra Trees (Recommendation)', 'Gaussian Naive Bayes', 'Logistic Regression', 
          'Neural Network', 'Neural Network (Custom)')
     )
     
