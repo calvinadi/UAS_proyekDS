@@ -71,12 +71,14 @@ def predict_rice_type(img, model_name):
     if model_name == 'Neural Network (Custom)':
         prediction = nn_model.predict(features_scaled)
         predicted_class = np.argmax(prediction)
+        probabilities = prediction[0]
     else:
         model = models[model_name]
         predicted_class = model.predict(features_scaled)[0]
+        probabilities = model.predict_proba(features_scaled)[0]
     
     rice_type = label_encoder.inverse_transform([predicted_class])[0]
-    return rice_type
+    return rice_type, probabilities
 
 st.title('Rice Type Classifier')
 
@@ -95,7 +97,13 @@ if uploaded_file is not None:
     )
     
     if st.button('Predict'):
-        rice_type = predict_rice_type(img, model_name)
+        rice_type, probabilities = predict_rice_type(img, model_name)
         st.success(f'The predicted rice type is: {rice_type}')
-
-st.write('Note: This app uses pre-trained models to classify rice types. Make sure you have all the necessary model files in the "saved_models" directory.')
+        
+        st.write('Prediction Probabilities:')
+        probabilities_df = pd.DataFrame({
+            'Rice Type': label_encoder.classes_,
+            'Probability': probabilities
+        })
+        probabilities_df = probabilities_df.sort_values('Probability', ascending=False)
+        st.dataframe(probabilities_df.style.format({'Probability': '{:.4f}'}))
