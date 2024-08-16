@@ -1,141 +1,101 @@
 import streamlit as st
-import joblib
-import pandas as pd
+import cv2
 import numpy as np
-from sklearn.preprocessing import MinMaxScaler
+import pandas as pd
+import joblib
+from tensorflow.keras.models import load_model
+from skimage.feature import graycomatrix, graycoprops
+import os
 
-# Label mapping
-label_mapping = {
-    0: 'ir64'
-    1: 'pandan wangi'
-    2: 'rojo lele'
-}
+# Load the saved models and encoders
+@st.cache_resource
+def load_models():
+    models = {
+        'Random Forest': joblib.load('saved_models/random_forest.joblib'),
+        'SVM': joblib.load('saved_models/svm.joblib'),
+        'KNN': joblib.load('saved_models/knn.joblib'),
+        'Decision Tree': joblib.load('saved_models/decision_tree.joblib'),
+        'Gradient Boosting': joblib.load('saved_models/gradient_boosting.joblib'),
+        'AdaBoost': joblib.load('saved_models/adaboost.joblib'),
+        'Extra Trees': joblib.load('saved_models/extra_trees.joblib'),
+        'Gaussian Naive Bayes': joblib.load('saved_models/gaussian_naive_bayes.joblib'),
+        'Logistic Regression': joblib.load('saved_models/logistic_regression.joblib'),
+        'Neural Network': joblib.load('saved_models/neural_network.joblib')
+    }
+    nn_model = load_model('saved_models/neural_network.h5')
+    scaler = joblib.load('saved_models/scaler.joblib')
+    label_encoder = joblib.load('saved_models/label_encoder.joblib')
+    return models, nn_model, scaler, label_encoder
 
-# Function to perform prediction based on selected model and input data
-def predict(model, input_data):
-    prediction = model.predict(input_data)
-    predicted_label = [label_mapping.get(pred) for pred in prediction]
-    probabilities = model.predict_proba(input_data)
-    return predicted_label, probabilities
+models, nn_model, scaler, label_encoder = load_models()
 
-# Streamlit interface
-st.title('Gabah Classifier')
+def extract_color_features(img):
+    hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    hist = cv2.calcHist([hsv_img], [0, 1, 2], None, [8, 8, 8], [0, 180, 0, 256, 0, 256])
+    color_features = cv2.normalize(hist, hist).flatten()
+    return color_features
 
-model_choice = st.sidebar.selectbox('Select Model', ('Decision Tree (Recommendation)',
-                                                     'XGBoost',
-                                                     'Random Forest'))
+def extract_texture_features(img):
+    gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    glcm = graycomatrix(gray_img, [1], [0, np.pi/4, np.pi/2, 3*np.pi/4])
+    texture_features = graycoprops(glcm, 'contrast').flatten()
+    return texture_features
 
-# Collects user input features into dataframe
-uploaded_file = st.sidebar.file_uploader("Upload your input CSV file", type=["csv"])
-if uploaded_file is not None:
-    input_df = pd.read_csv(uploaded_file)
-    is_file_uploaded = True
-else:
-    def user_input_features():
-        gender_encoded = st.selectbox('Gender', [0, 1], format_func=lambda x: 'Female' if x == 0 else 'Male')
-        refund = st.number_input('Refund', min_value=0, max_value=9999999, value=0)
-        wallet_balance = st.number_input('Wallet Balance', min_value=0, max_value=9999999, value=0)
-        # List of products
-        products = [
-            'None', 'Man Fashion', 'Woman Fashion', 'Food & Drink', 'Ride Hailing',
-            'Keperluan Rumah Tangga', 'Travel', 'Keperluan Anak', 'Elektronik', 'Other',
-            'Transportasi (Kereta Pesawat Kapal)', 'Top Up Game', 'Otomotif', 'Pulsa',
-            'Kesehatan', 'Investasi', 'Sewa Motor/Mobil', 'Hotel', 'Tagihan (WIFI PLN)'
-        ]
+def extract_shape_features(img):
+    gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray_img, 100, 200)
+    contours, _ = cv2.findContours(edges, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    
+    if len(contours) > 0:
+        cnt = contours[0]
+        area = cv2.contourArea(cnt)
+        perimeter = cv2.arcLength(cnt, True)
+        aspect_ratio = float(img.shape[1]) / img.shape[0]
+        shape_features = [area, perimeter, aspect_ratio]
+    else:
+        shape_features = [0, 0, 0]
+    
+    return shape_features
 
-        # Function to format product names
-        def product_format_func(x):
-            return products[x]
+def extract_visual_features(img):
+    color_features = extract_color_features(img)
+    texture_features = extract_texture_features(img)
+    shape_features = extract_shape_features(img)
+    features = np.concatenate((color_features, texture_features, shape_features))
+    return features
 
-        # Slider for most bought product
-        most_bought_product = st.selectbox(
-            'Most Bought Product',
-            options=list(range(len(products))),
-            format_func=product_format_func
-        )
+def predict_rice_type(img, model_name):
+    features = extract_visual_features(img)
+    features_scaled = scaler.transform([features])
+    
+    if model_name == 'Neural Network (Custom)':
+        prediction = nn_model.predict(features_scaled)
+        predicted_class = np.argmax(prediction)
+    else:
+        model = models[model_name]
+        predicted_class = model.predict(features_scaled)[0]
+    
+    rice_type = label_encoder.inverse_transform([predicted_class])[0]
+    return rice_type
 
-        st.write(f'You selected: {products[most_bought_product]}')
+st.title('Rice Type Classifier')
 
-        total_gross_amount = st.number_input('Total Gross Amount', min_value=0, max_value=99999999, value=0)
-        total_discount_amount = st.number_input('Total Discount Amount', min_value=0, max_value=99999999, value=0)
-        recency = st.number_input('Recency', min_value=0, max_value=1000, value=0)
-        frequency = st.number_input('Frequency', min_value=0, max_value=1000, value=0)
-        monetary = st.number_input('Monetary', min_value=0, max_value=999999999, value=0)
-
-        data = {'gender_encoded': gender_encoded,
-                'refund': refund,
-                'wallet_balance': wallet_balance,
-                'most_bought_product': most_bought_product,
-                'total_gross_amount': total_gross_amount,
-                'total_discount_amount': total_discount_amount,
-                'recency': recency,
-                'frequency': frequency,
-                'monetary': monetary
-                }
-        features = pd.DataFrame(data, index=[0])
-        return features
-
-    input_df = user_input_features()
-    is_file_uploaded = False
-
-# Combine user input with the cleaned df
-
-## Load the cleaned data
-df_raw = pd.read_csv('cleaned_df.csv')
-df_independent = df_raw.drop(columns=['customer_tier_encoded'])
-
-# Clean column names in df_independent from extra spaces
-df_independent.columns = df_independent.columns.str.strip()
-
-# Combine user input with the cleaned df
-df = pd.concat([input_df, df_independent], axis=0)
-
-# Selects only the user input data
-if is_file_uploaded:
-    df_input = input_df
-else:
-    df_input = df.iloc[:1, :]
-
-# Display the user input features
-st.subheader('User Input features')
+uploaded_file = st.file_uploader("Choose an image of rice", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
-    st.write(df_input)
-else:
-    st.write('Awaiting CSV file to be uploaded. Currently using example input parameters (shown below).')
-    st.write(df_input)
+    file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
+    img = cv2.imdecode(file_bytes, 1)
+    st.image(uploaded_file, caption='Uploaded Image', use_column_width=True)
+    
+    model_name = st.selectbox(
+        'Select the model for prediction',
+        ('Random Forest', 'SVM', 'KNN', 'Decision Tree', 'Gradient Boosting', 
+         'AdaBoost', 'Extra Trees', 'Gaussian Naive Bayes', 'Logistic Regression', 
+         'Neural Network', 'Neural Network (Custom)')
+    )
+    
+    if st.button('Predict'):
+        rice_type = predict_rice_type(img, model_name)
+        st.success(f'The predicted rice type is: {rice_type}')
 
-## Load the scaler
-min_max_scaler = joblib.load('min_max_scaler.joblib')
-std_scaler = joblib.load('std_scaler.joblib')
-
-df_input.loc[:, ["refund", "wallet_balance", "total_gross_amount",
-         "total_discount_amount", "monetary"]] = min_max_scaler.transform(df_input[["refund", 
-         "wallet_balance", "total_gross_amount",
-         "total_discount_amount", "monetary"]])
-
-df_std = std_scaler.transform(df_input)
-
-# Load the models
-loaded_xgb = joblib.load('xgb_model.joblib')
-loaded_dt = joblib.load('decision_tree_model.joblib')
-loaded_rf = joblib.load('randomforest_model.joblib')
-
-# Perform prediction on button click
-if st.sidebar.button('Predict'):
-    if model_choice == 'XGBoost':
-        result, probabilities = predict(loaded_xgb, df_std)
-    elif model_choice == 'Decision Tree (Recommendation)':
-        result, probabilities = predict(loaded_dt, df_std)
-    elif model_choice == 'Random Forest':
-        result, probabilities = predict(loaded_rf, df_std)
-
-    st.sidebar.write(f'Predictions:')
-    for i, (res, prob) in enumerate(zip(result, probabilities)):
-        st.sidebar.write(f'Row {i+1}: {res}')
-        st.sidebar.markdown('**Prediction Probabilities:**')
-        probabilities_html = "<ul>"
-        for j, p in enumerate(prob):
-            probabilities_html += f"<li style='font-size: 12px;'>{label_mapping[j]}: {p:.4f}</li>"
-        probabilities_html += "</ul>"
-        st.sidebar.markdown(probabilities_html, unsafe_allow_html=True)
+st.write('Note: This app uses pre-trained models to classify rice types. Make sure you have all the necessary model files in the "saved_models" directory.')
